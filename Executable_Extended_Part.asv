@@ -1,0 +1,238 @@
+clear all
+clc
+ 
+addpath('Input_Files','Element_Library','Mesh_Generation_Library','System_Preprocessor_Files','Decomposition_Files','Runtime_Calculation_Files','Solver_Files','Post_Processing_Files','External_Subsystem_Calculation')
+addpath('System_Preprocessor_Files\Solid')
+addpath('Runtime_Calculation_Files\Solid')
+addpath('Abaqus_Input_Files')
+
+fprintf('\nInitial System building starts---------------\n')
+
+%% Input FE elements
+    [Element_Information]=Element_Loader;
+
+%% Model Input File
+% Read Abaqus Input file
+
+      Name='FEM_Matlab_25.inp';
+      S_Names={'Sx','S1'};
+      Reg_Name={'Sx','S1'};
+      BC_Name={'BCx','BCy','BCz'};
+
+      [Mesh_Information]=Abaqus_File_Processor_4(Name,S_Names,Reg_Name,BC_Name,Element_Information);
+      
+     % [Nodes,IEN,Type,S_Nodes,S_Type,Reg_Nodes,~,BC_Nodes]=Abaqus_File_Processor('Beam_Hole_Matlab_Small.inp',{'Sy','BCx'},{'Reg'},{'BCx','BCy','BCz'},{'Material-1'});
+     
+     % [Nodes,IEN,Type,S_Nodes,S_Type,Reg_Nodes,~,BC_Nodes]=Abaqus_File_Processor('FEM_Matlab_25.inp',{'Sx','S1'},{'Reg'},{'BCx','BCy','BCz'},{'Material-1'});
+
+     % [Nodes,IEN,Type,S_Nodes,S_Type,Reg_Nodes,~,BC_Nodes]=Abaqus_File_Processor('FEM_Matlab_25_Linear.inp',{'Sx','Sy','S1'},{'Reg'},{'BC'},{'Material-1'});
+     
+     % [Nodes,IEN,Type,S_Nodes,S_Type,Reg_Nodes,~,BC_Nodes]=Abaqus_File_Processor('Pipe_Hole.inp',{'S1','S2'},{'Reg'},{'BC2','BC1','BC3'},{'Material-1'});
+     
+     % [Nodes,IEN,Type,S_Nodes,S_Type,Reg_Nodes,~,BC_Nodes]=Abaqus_File_Processor('Void_Matlab.inp',{'S1','S2'},{'Reg'},{'BCx','BCy','BCz'},{'Material-1'});
+
+   
+
+     %% Rotation
+     
+     Nodes=Mesh_Information.Nodes;
+
+     Alpha=90*pi/18*0;
+     Beta=-90*pi/18*0;
+     Gamma=45*pi/18*0;
+     
+     Rz=[cos(Gamma) -sin(Gamma) 0;sin(Gamma) cos(Gamma) 0; 0 0 1];
+     Ry=[cos(Beta) 0 sin(Beta);0 1 0;-sin(Beta) 0 cos(Beta)];
+     Rx=[1 0 0; 0 cos(Alpha) -sin(Alpha);0 sin(Alpha) cos(Alpha)];
+     R1=Rx*Ry*Rz;
+
+     for i=1:length(Nodes)
+         Nodes(i,2:4)=inv(R1)*[Nodes(i,2);Nodes(i,3);Nodes(i,4)];
+     end
+
+     Mesh_Information.Nodes=Nodes;
+     
+
+%% Material input      
+      Material_Information.MoE=68*10^9;
+      Material_Information.PoRat=0.3;
+      Material_Information.rho=2703;
+      Material_Information.alpe=10^-6;
+
+      [Dm]=Material_Array_Generator(Material_Information);     
+
+
+%% Update model element    
+      % [Mesh_Information]=Element_Converter_20_to_27(Mesh_Information,Element_Information);
+      [Mesh_Information]=Geometry_Model_Parameters_Preprocessor_Solid(Mesh_Information,Element_Information);
+      
+      Mesh_Information.Boundary_Cond=[1 0 0;
+                                      0 1 0
+                                      0 0 1];      
+
+
+%% Update model element      
+
+        EN=5;
+
+        Type=Mesh_Information.Type;  
+        IEN=Mesh_Information.IEN;
+        nnp_el=Element_Information.nnp_Elemental(Type(1,EN));
+        Nodes=Mesh_Information.Nodes;
+
+        Type(1,EN)=11;
+        Type(5,EN)=nnp_el;
+        Type(6,EN)=2;
+        
+        LN=Nodes(end,1);
+        
+        for i=1:Type(5,EN)
+          % Nodes(LN+i,1:4)=[LN+i Nodes(IEN(i),2) Nodes(IEN(i),3) Nodes(IEN(i),4)]; 
+          IEN(nnp_el+i,EN)=LN+i;
+        end   
+
+        Mesh_Information.Type=Type;
+        Mesh_Information.IEN=IEN;
+
+
+
+%% System preprocessor
+    
+    [FE_Information_Region]=Region_Integration_3D_Solid(Element_Information,Mesh_Information);
+
+    [FE_Information_Region]=Region_Integration_3D_Solid_Extended(Element_Information,Mesh_Information,FE_Information_Region);
+
+    [FE_Information_Surface]=Surface_Integration_3D_Pressure_Type_Solid(Element_Information,Mesh_Information);
+
+
+ds
+
+      
+%% Extended element
+
+% Hole along y axis!
+
+        Dmgh=length(Type);
+
+        EN=(Dmgh+1)/2;
+        
+        % EN=[5 6 7];
+        
+        % EN=5;
+        
+        % EN=5; % For pipe
+        
+        % EN=[31:33 40:42 49:51];
+        
+        %EN=[7 8 9 12 13 14 17 18 19];
+
+        EN=12; % Activate for Dome
+        
+        % EN=[23 24 27 26];
+        
+        % EN=62; % Activate for Void
+        
+        Location=[0.01 0.01 0];
+
+        
+        EL=62;
+        
+        % [N_Map,Nodes,~,IEN,S_Nodes,BC_Nodes,Reg_Nodes]=Node_Rearranger(Nodes,IEN,Type,S_Nodes,BC_Nodes,Reg_Nodes,IEN(:,EN));
+        
+        Type(5,EN)=Type(2,EN);
+        if Type(2,EN)==20
+            Type(1,EN)=13;
+        else
+            Type(1,EN)=12;
+        end
+        
+        LN=Nodes(end,1);
+        
+        for i=1:Type(5,EN)
+          % Nodes(LN+i,1:4)=[LN+i Nodes(IEN(i),2) Nodes(IEN(i),3) Nodes(IEN(i),4)]; 
+          IEN(Type(2,EN)+i,EN)=LN+i;
+        end      
+        
+        
+%         EN=6;
+%         Type(1,EN)=14;
+%         Type(5,EN)=20;
+%         LN=max(max(IEN));
+%         
+%         for i=1:Type(5,EN)
+%           % Nodes(LN+i,1:4)=[LN+i Nodes(IEN(i),2) Nodes(IEN(i),3) Nodes(IEN(i),4)]; 
+%           IEN(Type(2,EN)+i,EN)=LN+i;
+%           
+%         end    
+%         
+%         EN=7;
+%         Type(1,EN)=15;
+%         Type(5,EN)=20;
+%         LN=max(max(IEN));
+%         for i=1:Type(5,EN)
+%           % Nodes(LN+i,1:4)=[LN+i Nodes(IEN(i),2) Nodes(IEN(i),3) Nodes(IEN(i),4)]; 
+%           IEN(Type(2,EN)+i,EN)=LN+i;
+%           
+%         end    
+        
+        
+%% System preprocessor
+    [ndof,nel,neq,nnp,LM,IEN_Colm,IEN_Colm2]=Geometry_Model_Parameters_Preprocessor(Nodes,IEN,Type);
+    [B,dJB,P_surf,Type,Shape,W,DShape,BEx,dTeS]=Finite_Element_Parameter_Preprocessor(IEN,Type,S_Type,Nodes);
+
+    % [B,dJB,P_surf,Type,Shape,IShape,W,DShape]=Finite_Element_Parameter_Preprocessor(IEN,Type,S_Type,Nodes);
+    
+    fprintf('Initial System building completed--------------\n')    
+    
+    
+%% Mat property and Stiffness    
+ 
+    [Dm]=Material_Array_Generator(MoE,PoRat);
+    
+    [K]=Elemental_Stiffness_Matrix_Generator_GP_Wise(B,Dm,dJB,W,Type,1:nel,nel,BEx,LM,neq);
+    
+%% Boundary input  
+    Bc=zeros(length(K),1);
+    fS=zeros(length(K),1);
+
+    % For rectangular case
+%    Bc(BC_Nodes(:,1)*3-2)=1;
+%    Bc(BC_Nodes(1:28,2)*3-1)=1;
+%    Bc(BC_Nodes(1:24,3)*3-0)=1;
+    
+
+
+[Bc(1:neq)]=Boundary_Condition_Set(Nodes,BC_Nodes,Boundary_Cond);
+
+
+
+    % Bc(BC_Nodes(1:20,1)*3-2)=1;
+    % Bc(BC_Nodes(1:20,2)*3-1)=1;
+    % Bc(BC_Nodes(:,3)*3-0)=1;
+    % Bc(BC_Nodes(1:20,3)*3-0)=1;
+    
+    [K]=Boundary_Set(Bc,length(K),K);
+    
+    
+%%
+    
+    % [fS1]=Pressure_to_Equivalent_Nodal_Force(nnp,LM,Type,S_Type,P_surf,Pressure*[ones(length(S_Type),1) ones(length(S_Type),1) ones(length(S_Type),1)*0]);
+    
+    
+    [fS1]=Pressure_to_Equivalent_Nodal_Force(nnp,LM,Type,S_Type,P_surf,[PressureY*ones(length(S_Type),1) PressureX*ones(length(S_Type),1)*0]);
+
+    
+    % [fS1]=Pressure_to_Equivalent_Nodal_Force(nnp,LM,Type,S_Type,P_surf,Pressure*[ones(length(S_Type),1)]);
+
+    
+    % [fS2]=Pressure_to_Equivalent_Nodal_Force(nnp,LM,Type,S_Type,P_surf,Pressure*ones(length(S_Type),1),2);
+    
+    fS(1:neq)=fS1;
+    
+    f_BC=Bc*-1+1;
+    
+%% Solution    
+
+    d=inv(K)*(fS.*f_BC);
+    
+    
